@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from .cleanup import background_mask
+from .cleanup import background_mask, border_color, defringe
 from .color import rgb_to_oklab
 
 DEFAULT_NAMES = {1: ["front"], 2: ["front", "back"], 3: ["front", "side", "back"], 4: ["front", "side", "back", "side_b"]}
@@ -30,9 +30,10 @@ def cutout(image: Image.Image, tolerance: float = 0.08) -> np.ndarray:
     """RGBA array with the flood-filled background made transparent."""
     rgb = np.asarray(image.convert("RGB"))
     lab = rgb_to_oklab(rgb)
-    bg = background_mask(lab, tolerance)
-    rgba = np.dstack([rgb, np.where(bg, 0, 255).astype(np.uint8)])
-    return rgba
+    bg_color = border_color(lab)
+    bg = background_mask(lab, tolerance, bg_color)
+    alpha = defringe(np.where(bg, 0, 255).astype(np.uint8), lab, bg_color, tolerance)
+    return np.dstack([rgb, alpha])
 
 
 def _column_runs(alpha: np.ndarray, min_gap: int, min_width: int) -> list[tuple[int, int]]:

@@ -23,6 +23,11 @@ def _shift(a: np.ndarray, dy: int, dx: int, fill) -> np.ndarray:
     return out
 
 
+def border_color(lab: np.ndarray) -> np.ndarray:
+    border = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
+    return np.median(border, axis=0)
+
+
 def background_mask(
     lab: np.ndarray, tolerance: float = 0.03, background: np.ndarray | None = None
 ) -> np.ndarray:
@@ -34,8 +39,7 @@ def background_mask(
     """
     h, w = lab.shape[:2]
     if background is None:
-        border = np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])
-        background = np.median(border, axis=0)
+        background = border_color(lab)
     candidate = np.sqrt(((lab - background) ** 2).sum(-1)) <= tolerance
     region = np.zeros((h, w), dtype=bool)
     region[0, :] = candidate[0, :]
@@ -50,6 +54,25 @@ def background_mask(
         if (grown == region).all():
             return region
         region = grown
+
+
+def defringe(alpha: np.ndarray, lab: np.ndarray, background: np.ndarray, tolerance: float, passes: int = 4) -> np.ndarray:
+    """Clear background-coloured pixels that touch transparency.
+
+    Flood fill can't reach background trapped between thin details (gaps in
+    fringe, between dangling beads).  Growing the transparent region through
+    pixels of the background colour, one ring at a time, does.
+    """
+    out = alpha.copy()
+    bg_like = np.sqrt(((lab - background) ** 2).sum(-1)) <= tolerance * 2.5
+    for _ in range(passes):
+        transparent = out == 0
+        touching = np.any([_shift(transparent, dy, dx, False) for dy, dx in _N8], axis=0)
+        eat = bg_like & touching & ~transparent
+        if not eat.any():
+            break
+        out[eat] = 0
+    return out
 
 
 def remove_islands(alpha: np.ndarray, min_fraction: float = 0.02) -> np.ndarray:

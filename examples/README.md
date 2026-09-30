@@ -43,3 +43,14 @@ pixelforge rotate lantern.png -o spin --spin 12 --gif         # 12-frame spin fo
 | Rotated 30° (RotSprite, palette-locked) | 12-frame spin |
 |---|---|
 | ![](output/wraith_rotated_30.png) | ![](output/lantern_spin/lantern_spin.gif) |
+
+## A real Midjourney character sheet through the pipeline
+
+`reference/wraith_sheet.webp` was made with prompt A. `pixelforge project run wraith split`
+cut it into front / side / back with the background (and the white trapped
+between the beads) removed; the front view became a sprite and a cloak-sway
+clip via the quick path; `model` built the 3D mesh spec from it.
+
+| Views cut from the sheet | Front sprite (hd) | Cloak clip |
+|---|---|---|
+| ![](output/sheet_wraith/front.png) ![](output/sheet_wraith/side.png) ![](output/sheet_wraith/back.png) | ![](output/sheet_wraith/sprite_front_x4.png) | ![](output/sheet_wraith/cloak.gif) |
