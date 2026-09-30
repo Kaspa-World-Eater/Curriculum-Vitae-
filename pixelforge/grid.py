@@ -15,9 +15,10 @@ import numpy as np
 from .color import rgb_to_oklab
 
 
-# Real upscaled pixel art scores ~2-8; painterly AI "pixel-style" renders with
-# no consistent grid score ~1.1-1.4.  Below this we don't trust the detection.
-MIN_CONFIDENCE = 1.6
+# Score = fraction of comb teeth landing on real edges.  Upscaled pixel art
+# scores ~0.8-1.0; painterly AI "pixel-style" renders with no consistent grid
+# score ~0.4-0.55.  Below this we don't trust the detection.
+MIN_CONFIDENCE = 0.65
 
 
 @dataclass
@@ -34,47 +35,44 @@ class Grid:
         return max(w, 1), max(h, 1)
 
 
-def _edge_profile(lab: np.ndarray, axis: int) -> np.ndarray:
+def _edge_strength(lab: np.ndarray, axis: int) -> np.ndarray:
     """Mean color change between neighbouring columns (axis=1) or rows (axis=0)."""
     d = np.sqrt((np.diff(lab, axis=axis) ** 2).sum(-1))
-    # Count only *strong* edges: weak ones are mostly codec noise (JPEG/WebP
-    # blocks sit on a 4/8 px grid and would otherwise masquerade as pixels).
-    threshold = max(np.percentile(d, 85), 0.02)
-    return (d > threshold).mean(axis=1 - axis)
+    return d.mean(axis=1 - axis)
 
 
-def _best_period(profile: np.ndarray, min_scale: float, max_scale: float, step: float):
-    """Score candidate periods with a comb filter over the edge profile.
+def _best_period(strength: np.ndarray, min_scale: float, max_scale: float, step: float):
+    """Find the period of the edge profile with a comb filter.
 
-    For a candidate period ``s`` and phase ``o`` we average the profile at
-    positions ``o + k*s``.  The true grid lines up with the edge spikes and scores
-    high. Multiples of the true period score about as well, so we pick the
-    *smallest* period whose score is within 75% of the best one (larger periods
-    get a noisy upward bias because they are averaged over fewer samples).
+    For a candidate period ``s`` about one column in ``s`` is a pixel boundary,
+    so only the strongest ``0.9/s`` of columns are kept as "edges" for that
+    candidate.  The score is the fraction of the comb's teeth (``o + k*s``) that
+    land on a kept edge: ~0.9 for the true period, ~0.45 for a multiple (half
+    the teeth hit), ~0.5-0.6 for a sub-period, and small for anything else.
+    Codec block edges (JPEG/WebP, 8 px) are weak and drop out of the kept set
+    whenever real pixel edges exist.
     """
-    n = len(profile)
-    base = profile.mean() + 1e-9
+    n = len(strength)
     xs = np.arange(n)
-    candidates = []
+    order = np.sort(strength)
+    best_all = (0.0, 1.0, 0.0)  # score, period, offset
     for s in np.arange(min_scale, max_scale + 1e-9, step):
         if s * 4 > n:
             break
-        best = (0.0, 0.0)
+        keep = max(1, int(round(n * 0.9 / s)))
+        thr = max(order[-keep], 0.02)
+        profile = (strength >= thr).astype(float)
         for o in np.arange(0.0, s, 0.5):
             pos = np.arange(o, n - 1, s)
-            score = np.interp(pos, xs, profile).mean() / base
-            if score > best[0]:
-                best = (score, o)
-        candidates.append((s, best[0], best[1]))
-    if not candidates:
+            score = float(np.interp(pos, xs, profile).mean())
+            if score > best_all[0] + 1e-9:
+                best_all = (score, float(s), float(o))
+    score, s, o = best_all
+    if score <= 0:
         return 1.0, 0.0, 0.0
-    top = max(c[1] for c in candidates)
-    for s, score, o in candidates:
-        if score >= 0.75 * top:
-            # the profile is of *differences*, so an edge at index i sits between
-            # pixels i and i+1 -> cells start at o + 1
-            return float(s), float((o + 1) % s), float(score)
-    return 1.0, 0.0, 0.0
+    # the profile is of *differences*, so an edge at index i sits between
+    # pixels i and i+1 -> cells start at o + 1
+    return s, float((o + 1) % s), score
 
 
 def detect_grid(
@@ -82,8 +80,8 @@ def detect_grid(
 ) -> Grid:
     """Estimate the logical pixel size of fake/upscaled pixel art."""
     lab = rgb_to_oklab(rgb)
-    sx, ox, cx = _best_period(_edge_profile(lab, 1), min_scale, max_scale, step)
-    sy, oy, cy = _best_period(_edge_profile(lab, 0), min_scale, max_scale, step)
+    sx, ox, cx = _best_period(_edge_strength(lab, 1), min_scale, max_scale, step)
+    sy, oy, cy = _best_period(_edge_strength(lab, 0), min_scale, max_scale, step)
     # Pixel art is almost always square-pixel; if the axes disagree slightly,
     # trust the more confident one.
     if abs(sx - sy) / max(sx, sy) < 0.15:
