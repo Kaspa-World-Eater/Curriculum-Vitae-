@@ -2,7 +2,7 @@
 
 Your three reference renders (`reference/`) run through `pixelforge` with no
 manual touch-up (`output/`). Left: original AI render. Right: real pixel art
-(true pixel grid, 20–32 colors, transparent cutout where wanted).
+(true pixel grid, up to 96 colors, ~224 px tall — the "modern HD pixel" look; transparent cutout where wanted).
 
 | | Before / after | Animated (procedural, from the single still) |
 |---|---|---|
@@ -14,9 +14,9 @@ Commands used:
 
 ```sh
 cd examples/output
-pixelforge pixelate ../reference/lantern_wraith.webp -o wraith.png --remove-bg --crop --outline auto --colors 32
-pixelforge pixelate ../reference/grave_knight.webp  -o knight.png --max-size 160 --colors 20
-pixelforge pixelate ../reference/hearth_beggar.webp -o beggar.png --max-size 128 --colors 20 --dither bayer --dither-strength 0.4
+pixelforge pixelate ../reference/lantern_wraith.webp -o wraith.png --remove-bg --crop --outline auto
+pixelforge pixelate ../reference/grave_knight.webp  -o knight.png
+pixelforge pixelate ../reference/hearth_beggar.webp -o beggar.png --max-size 160
 
 pixelforge animate wraith.png -o wraith_anim --preset idle --effect "flicker:amount=0.12,threshold=0.5,box=0;0.3;0.4;0.7" --gif
 pixelforge animate knight.png -o knight_anim --preset grass \

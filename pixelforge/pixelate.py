@@ -18,10 +18,10 @@ from .quantize import quantize
 @dataclass
 class PixelateOptions:
     scale: float | str = "auto"  # "auto" or logical pixel size in source pixels
-    max_size: int = 160  # fallback when auto-detection is not confident
+    max_size: int = 224  # fallback when auto-detection is not confident
     width: int | None = None  # force output width in sprite pixels
     height: int | None = None  # force output height in sprite pixels
-    colors: int = 24
+    colors: int = 96
     palette: Palette | None = None
     dither: str = "none"
     dither_strength: float = 0.6
