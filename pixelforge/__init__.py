@@ -5,11 +5,14 @@ from .grid import Grid, detect_grid
 from .palette import Palette
 from .pixelate import PixelateOptions, PixelateResult, pixelate, pixelate_frames
 from .spritesheet import Animation, SpriteSheet, pack, save_gif, slice_sheet
+from .styles import STYLES, Style, get_style
+from .transform import flip, rotate, scale2x, spin_frames, turn
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Animation", "Bob", "Breathe", "Flicker", "Grid", "PRESETS", "Palette", "PixelateOptions",
     "PixelateResult", "SpriteSheet", "Sway", "animate", "detect_grid", "pack", "pixelate",
-    "pixelate_frames", "save_gif", "slice_sheet",
+    "pixelate_frames", "save_gif", "slice_sheet", "STYLES", "Style", "get_style", "flip", "rotate",
+    "scale2x", "spin_frames", "turn",
 ]

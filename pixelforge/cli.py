@@ -15,6 +15,8 @@ from .palette import Palette
 from .pixelate import PixelateOptions, pixelate, pixelate_frames
 from .quantize import DITHER_MODES
 from .spritesheet import pack, save_gif, slice_sheet
+from .styles import DEFAULT_STYLE, STYLES, get_style
+from .transform import flip, rotate, spin_frames, turn
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 
@@ -44,13 +46,15 @@ def _parse_anim(spec: str) -> tuple[str, list[Path], float]:
 
 def _add_pixelate_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("pixelation")
+    styles = ", ".join(f"{k} ({v.max_size}px/{v.colors} colors)" for k, v in STYLES.items())
+    g.add_argument("--style", choices=sorted(STYLES), default=DEFAULT_STYLE, help=f"quality tier: {styles}")
     g.add_argument("--scale", default="auto", help="logical pixel size in source pixels, or 'auto' (default)")
-    g.add_argument("--max-size", type=int, default=224, help="fallback longest side when no grid is detected")
+    g.add_argument("--max-size", type=int, help="fallback longest side when no grid is detected (default: from --style)")
     g.add_argument("--width", type=int, help="force sprite width in pixels")
     g.add_argument("--height", type=int, help="force sprite height in pixels")
-    g.add_argument("--colors", type=int, default=96, help="palette size when extracting (default 96)")
+    g.add_argument("--colors", type=int, help="palette size when extracting (default: from --style)")
     g.add_argument("--palette", help="use a fixed palette (.hex, .gpl or .png)")
-    g.add_argument("--dither", choices=DITHER_MODES, default="none")
+    g.add_argument("--dither", choices=DITHER_MODES, help="default: from --style")
     g.add_argument("--dither-strength", type=float, default=0.6)
     g.add_argument("--remove-bg", action="store_true", help="flood-remove the background from the borders")
     g.add_argument("--bg-tolerance", type=float, default=0.03, help="OKLab distance for --remove-bg")
@@ -60,14 +64,15 @@ def _add_pixelate_args(p: argparse.ArgumentParser) -> None:
 
 
 def _options(a) -> PixelateOptions:
+    style = get_style(a.style)
     return PixelateOptions(
         scale=a.scale if a.scale == "auto" else float(a.scale),
-        max_size=a.max_size,
+        max_size=a.max_size or style.max_size,
         width=a.width,
         height=a.height,
-        colors=a.colors,
+        colors=a.colors or style.colors,
         palette=Palette.load(a.palette) if a.palette else None,
-        dither=a.dither,
+        dither=a.dither or style.dither,
         dither_strength=a.dither_strength,
         remove_background=a.remove_bg,
         bg_tolerance=a.bg_tolerance,
@@ -133,6 +138,8 @@ def cmd_animate(a) -> None:
     if not effects:
         raise SystemExit("choose at least one --preset or --effect")
     palette = Palette.load(a.palette) if a.palette else None
+    if a.flip:
+        sprite = flip(sprite)
     frames = animate(sprite, effects, a.frames, palette=palette)
     out = Path(a.output)
     out.mkdir(parents=True, exist_ok=True)
@@ -171,6 +178,36 @@ def cmd_godot(a) -> None:
     files = godot.export(sheet, a.out, a.name, a.res_dir)
     for kind, path in files.items():
         print(f"{kind:5s} {path}")
+
+
+def cmd_rotate(a) -> None:
+    import numpy as np
+
+    sprite = np.asarray(Image.open(a.sprite).convert("RGBA"))
+    out = Path(a.output)
+    stem = Path(a.sprite).stem
+    if a.spin:
+        out.mkdir(parents=True, exist_ok=True)
+        frames = spin_frames(sprite, a.spin, clockwise=not a.ccw)
+        for i, f in enumerate(frames):
+            Image.fromarray(f, "RGBA").save(out / f"{stem}_spin_{i:03d}.png")
+        if a.gif:
+            save_gif(frames, out / f"{stem}_spin.gif", fps=a.fps, zoom=a.zoom)
+        print(f"{len(frames)} spin frames ({frames[0].shape[1]}x{frames[0].shape[0]}) -> {out}")
+        return
+    result = sprite
+    if a.flip:
+        result = flip(result, horizontal=a.flip == "h")
+    if a.turn:
+        result = turn(result, a.turn)
+    if a.angle:
+        result = rotate(result, a.angle)
+    if out.suffix.lower() != ".png":
+        out.mkdir(parents=True, exist_ok=True)
+        out = out / f"{stem}_rot.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.ascontiguousarray(result), "RGBA").save(out)
+    print(f"{a.sprite} -> {out} ({result.shape[1]}x{result.shape[0]})")
 
 
 def cmd_slice(a) -> None:
@@ -222,6 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fps", type=float, default=8)
     s.add_argument("--name", default="anim", help="frame file prefix")
     s.add_argument("--palette", help="palette for flicker (default: the sprite's own colors)")
+    s.add_argument("--flip", action="store_true", help="mirror first, e.g. to make the left-facing set")
     s.add_argument("--gif", action="store_true")
     s.add_argument("--zoom", type=int, default=4)
     s.set_defaults(func=cmd_animate)
@@ -240,6 +278,19 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--out", required=True, help="directory inside your Godot project")
             s.add_argument("--res-dir", required=True, help="res:// path of --out, e.g. res://sprites/knight")
         s.set_defaults(func=func)
+
+    s = sub.add_parser("rotate", help="flip, turn or rotate a sprite without blurring it (RotSprite)")
+    s.add_argument("sprite")
+    s.add_argument("-o", "--output", required=True, help="output .png, or a directory for --spin")
+    s.add_argument("--angle", type=float, default=0.0, help="degrees counter-clockwise, any value")
+    s.add_argument("--turn", type=int, default=0, help="exact quarter turns counter-clockwise (1 = 90 degrees)")
+    s.add_argument("--flip", choices=["h", "v"], help="mirror horizontally (face the other way) or vertically")
+    s.add_argument("--spin", type=int, metavar="N", help="make an N-frame full-rotation animation instead")
+    s.add_argument("--ccw", action="store_true", help="spin counter-clockwise")
+    s.add_argument("--gif", action="store_true")
+    s.add_argument("--fps", type=float, default=12)
+    s.add_argument("--zoom", type=int, default=4)
+    s.set_defaults(func=cmd_rotate)
 
     s = sub.add_parser("slice", help="cut a grid sprite sheet into frames")
     s.add_argument("sheet")

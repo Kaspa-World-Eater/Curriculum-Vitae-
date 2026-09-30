@@ -26,3 +26,20 @@ pixelforge animate beggar.png -o beggar_anim \
     --effect "flicker:amount=0.12,threshold=0.4,box=0.75;0.45;1;1,cycles=3" \
     --effect "breathe:amplitude=1,pivot=0.55,box=0.3;0.1;0.85;0.8" --gif
 ```
+
+## Quality tiers, rotation and spin
+
+```sh
+pixelforge pixelate render.webp -o sprite.png --style 8bit    # 64px, 12 colors
+pixelforge pixelate render.webp -o sprite.png --style 16bit   # 128px, 32 colors
+pixelforge pixelate render.webp -o sprite.png --style snes    # 160px, 48 colors
+pixelforge pixelate render.webp -o sprite.png --style hd      # 224px, 96 colors (default)
+
+pixelforge rotate sprite.png -o sprite_left.png --flip h      # face the other way
+pixelforge rotate sprite.png -o sprite_30.png  --angle 30     # any angle, no blur, no new colors
+pixelforge rotate lantern.png -o spin --spin 12 --gif         # 12-frame spin for pickups / projectiles
+```
+
+| Rotated 30° (RotSprite, palette-locked) | 12-frame spin |
+|---|---|
+| ![](output/wraith_rotated_30.png) | ![](output/lantern_spin/lantern_spin.gif) |
