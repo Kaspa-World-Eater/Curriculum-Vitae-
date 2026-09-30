@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pixelforge"
+version = "0.1.0"
+description = "Research and tools for generating, cleaning and animating pixel-art sprites for games (Godot export included)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pillow>=10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+train = [
+  "torch>=2.2",
+  "diffusers>=0.30",
+  "transformers>=4.40",
+  "accelerate>=0.30",
+  "peft>=0.11",
+  "safetensors",
+]
+
+[project.scripts]
+pixelforge = "pixelforge.cli:main"
+
+[tool.setuptools]
+packages = ["pixelforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

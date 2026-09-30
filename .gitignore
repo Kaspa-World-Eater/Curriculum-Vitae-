@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+# training artifacts
+training/output/
+training/dataset/
+*.safetensors
+*.ckpt
+# godot
+godot/demo/.godot/
+*.import
