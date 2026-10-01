@@ -266,11 +266,153 @@ def bake_clip(arm, clip: Clip, height: float):
     return action
 
 
+# ------------------------------------------------------------ retargeting
+# Quaternius / Rigify DEF-* names -> our mixamorig names
+LIBRARY_MAP = {
+    "Hips": "DEF-hips",
+    "Spine": "DEF-spine.001",
+    "Spine1": "DEF-spine.003",
+    "Neck": "DEF-neck",
+    "Head": "DEF-head",
+    "LeftShoulder": "DEF-shoulder.L",
+    "LeftArm": "DEF-upper_arm.L",
+    "LeftForeArm": "DEF-forearm.L",
+    "LeftHand": "DEF-hand.L",
+    "RightShoulder": "DEF-shoulder.R",
+    "RightArm": "DEF-upper_arm.R",
+    "RightForeArm": "DEF-forearm.R",
+    "RightHand": "DEF-hand.R",
+    "LeftUpLeg": "DEF-thigh.L",
+    "LeftLeg": "DEF-shin.L",
+    "LeftFoot": "DEF-foot.L",
+    "RightUpLeg": "DEF-thigh.R",
+    "RightLeg": "DEF-shin.R",
+    "RightFoot": "DEF-foot.R",
+}
+LIBRARY_CLIPS = {  # our clip -> (library action, loop)
+    "idle": ("Idle_Loop", True),
+    "walk": ("Walk_Loop", True),
+    "run": ("Jog_Fwd_Loop", True),
+    "sprint": ("Sprint_Loop", True),
+    "attack": ("Sword_Attack", False),
+    "attack_idle": ("Sword_Idle", True),
+    "punch": ("Punch_Cross", False),
+    "hit": ("Hit_Chest", False),
+    "death": ("Death01", False),
+    "cast": ("Spell_Simple_Shoot", False),
+    "cast_idle": ("Spell_Simple_Idle_Loop", True),
+    "roll": ("Roll", False),
+    "crouch": ("Crouch_Idle_Loop", True),
+    "crouch_walk": ("Crouch_Fwd_Loop", True),
+    "jump": ("Jump_Loop", True),
+    "torch_idle": ("Idle_Torch_Loop", True),
+    "interact": ("Interact", False),
+    "pickup": ("PickUp_Table", False),
+}
+
+
+def import_library(path: str):
+    """Import the animation library GLB; return its armature (actions come along)."""
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=path)
+    new = [o for o in bpy.data.objects if o not in before]
+    arms = [o for o in new if o.type == "ARMATURE"]
+    if not arms:
+        raise SystemExit(f"no armature in {path}")
+    for o in new:  # the mannequin mesh is not needed
+        if o.type == "MESH":
+            bpy.data.objects.remove(o, do_unlink=True)
+    return arms[0]
+
+
+def _rest_world(arm, bone_name):
+    b = arm.data.bones[bone_name]
+    m = arm.matrix_world @ b.matrix_local
+    return m, (arm.matrix_world.to_3x3() @ (b.tail_local - b.head_local)).normalized()
+
+
+def retarget_clip(src, dst, src_action, name: str, loop: bool, fps: int, src_fps: float):
+    """Bake ``src_action`` from the library armature onto ``dst``.
+
+    For every mapped bone the source bone's world-space rotation *delta from
+    its rest* is applied to our bone's rest, after aligning the two rest
+    directions (the library is T-posed, our rig is not).  Hips translation is
+    copied, scaled by hip height, so bobs and falls survive.
+    """
+    scene = bpy.context.scene
+    src.animation_data_create()
+    src.animation_data.action = src_action
+    start, end = (int(round(v)) for v in src_action.frame_range)
+    n_src = max(end - start, 1)
+    step = src_fps / fps  # source frames per output frame
+    n_out = max(2, int(round(n_src / step)))
+
+    action = bpy.data.actions.new(name)
+    action.use_fake_user = True
+    dst.animation_data_create()
+    dst.animation_data.action = action
+    for pb in dst.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+        pb.matrix_basis.identity()
+
+    rest = {}  # our bone -> (rest_world 4x4, dir)
+    srest = {}
+    offs = {}
+    pairs = []
+    for ours, theirs in LIBRARY_MAP.items():
+        if R + ours not in dst.pose.bones or theirs not in src.pose.bones:
+            continue
+        rw, rd = _rest_world(dst, R + ours)
+        sw, sd = _rest_world(src, theirs)
+        rest[ours], srest[ours] = rw, sw
+        offs[ours] = rd.rotation_difference(sd).to_matrix()  # our dir -> their dir
+        pairs.append((ours, theirs))
+    order = [b for b, _, _, _ in BONES if b in dict(pairs)]  # parents first
+    their = dict(pairs)
+    parent_of = {b: p for b, _, _, p in BONES}
+    hips_scale = rest["Hips"].translation.z / max(srest["Hips"].translation.z, 1e-6)
+
+    for fi in range(n_out + (1 if loop else 0)):
+        f_src = start + (fi % n_out) * step if loop else start + min(fi * step, n_src)
+        scene.frame_set(int(f_src), subframe=f_src - int(f_src))
+        pose_world = {}
+        for ours in order:
+            theirs = their[ours]
+            spm = src.matrix_world @ src.pose.bones[theirs].matrix
+            delta = spm.to_3x3() @ srest[ours].to_3x3().inverted()
+            desired_rot = delta @ offs[ours] @ rest[ours].to_3x3()
+            parent = parent_of[ours]
+            while parent and parent not in pose_world:  # unmapped parent: walk up
+                parent = parent_of[parent]
+            pb = dst.pose.bones[R + ours]
+            if parent is None:
+                desired = desired_rot.to_4x4()
+                src_hip = (src.matrix_world @ src.pose.bones[theirs].matrix).translation
+                desired.translation = rest[ours].translation + (src_hip - srest[ours].translation) * hips_scale
+                chain = rest[ours]
+            else:
+                chain = pose_world[parent] @ rest[parent].inverted() @ rest[ours]
+                desired = desired_rot.to_4x4()
+                desired.translation = chain.translation
+            # Blender: pose = parent_pose @ parent_rest^-1 @ bone_rest @ basis,
+            # so basis is simply chain^-1 @ desired (already in bone space).
+            pb.matrix_basis = chain.inverted() @ desired
+            pose_world[ours] = desired
+            pb.keyframe_insert("rotation_quaternion", frame=fi + 1)
+            if parent is None:
+                pb.keyframe_insert("location", frame=fi + 1)
+    dst.animation_data.action = None
+    src.animation_data.action = None
+    return action, n_out
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--skeleton", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--clips", default="idle,walk,run,attack,hit,death")
+    p.add_argument("--library", help="animation library .glb to retarget from (else procedural clips)")
+    p.add_argument("--clip", action="append", default=[], help="override mapping: ours=LibraryAction[:loop]")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--smooth-weights", type=int, default=3)
     a = script_args(p)
@@ -296,12 +438,30 @@ def main() -> None:
     bpy.context.scene.render.fps = a.fps
     names = [c.strip() for c in a.clips.split(",") if c.strip()]
     made = []
+    mapping = dict(LIBRARY_CLIPS)
+    for spec in a.clip:
+        ours, _, rest_ = spec.partition("=")
+        lib, _, loop = rest_.partition(":")
+        mapping[ours] = (lib, loop.lower() in ("", "loop", "true", "1"))
+    lib_arm = import_library(os.path.abspath(a.library)) if a.library else None
+    lib_fps = 24.0
     for name in names:
-        if name not in CLIPS:
-            print(f"PF_WARN unknown clip {name}; choose from {sorted(CLIPS)}")
-            continue
-        bake_clip(arm, CLIPS[name], height)
-        made.append(name)
+        if lib_arm is not None and name in mapping and mapping[name][0] in bpy.data.actions:
+            lib_action, loop = mapping[name]
+            _, n = retarget_clip(lib_arm, arm, bpy.data.actions[lib_action], name, loop, a.fps, lib_fps)
+            made.append(name)
+            print(f"PF_INFO {name} <- {lib_action} ({n} frames)")
+        elif name in CLIPS:
+            bake_clip(arm, CLIPS[name], height)
+            made.append(name)
+            print(f"PF_INFO {name} <- procedural")
+        else:
+            print(f"PF_WARN unknown clip {name}; choose from {sorted(set(CLIPS) | set(mapping))}")
+    if lib_arm is not None:
+        for act in list(bpy.data.actions):
+            if act.name not in made:
+                bpy.data.actions.remove(act)
+        bpy.data.objects.remove(lib_arm, do_unlink=True)
     out = os.path.abspath(a.out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=out)
