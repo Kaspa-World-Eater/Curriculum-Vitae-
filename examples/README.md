@@ -54,3 +54,13 @@ clip via the quick path; `model` built the 3D mesh spec from it.
 | Views cut from the sheet | Front sprite (hd) | Cloak clip |
 |---|---|---|
 | ![](output/sheet_wraith/front.png) ![](output/sheet_wraith/side.png) ![](output/sheet_wraith/back.png) | ![](output/sheet_wraith/sprite_front_x4.png) | ![](output/sheet_wraith/cloak.gif) |
+
+## Fully automatic character (motion library, no Mixamo)
+
+The wraith sheet → carve → built-in rig with the CC0 motion library → 8-direction
+render → pixelate → Godot. `output/wraith_godot/` holds the Godot files (one sheet
+per action; only `wraith_walk.png` is committed as a sample).
+
+| walk | attack | death |
+|---|---|---|
+| ![](output/sheet_wraith/walk_8dir.gif) | ![](output/sheet_wraith/attack_8dir.gif) | ![](output/sheet_wraith/death_8dir.gif) |
