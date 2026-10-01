@@ -36,6 +36,12 @@ class Studio:
         self._previews: list = []  # keep PhotoImage refs alive
         root.title(APP_TITLE)
         root.geometry("1180x760")
+        icon = Path(__file__).resolve().parent.parent / "assets" / "pixelforge.ico"
+        if icon.exists():
+            try:
+                root.iconbitmap(str(icon))
+            except Exception:  # noqa: BLE001  (non-Windows Tk)
+                pass
         root.minsize(900, 600)
         self._build()
         root.after(100, self._drain_log)
