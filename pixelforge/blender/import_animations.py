@@ -23,7 +23,39 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # type: ignore
 
-from pf_common import UV_BACK, UV_FRONT, assign_material, build_projection_material, load_image, script_args  # noqa: E402
+from pf_common import UV_BACK, UV_FRONT, UV_SIDE, assign_material, build_projection_material, load_image, script_args  # noqa: E402
+
+
+def smooth_weights(mesh, passes: int) -> None:
+    """Laplacian-smooth every vertex group so a robe swings instead of folding
+    sharply around the leg bones (Mixamo's auto-weights are tight)."""
+    import numpy as np
+
+    me = mesh.data
+    n = len(me.vertices)
+    groups = list(mesh.vertex_groups)
+    if not groups or n == 0:
+        return
+    edges = np.array([[e.vertices[0], e.vertices[1]] for e in me.edges], dtype=np.int64)
+    weights = np.zeros((n, len(groups)))
+    for v in me.vertices:
+        for g in v.groups:
+            weights[v.index, g.group] = g.weight
+    deg = np.bincount(edges.ravel(), minlength=n).astype(np.float64)
+    deg[deg == 0] = 1
+    for _ in range(passes):
+        acc = np.zeros_like(weights)
+        np.add.at(acc, edges[:, 0], weights[edges[:, 1]])
+        np.add.at(acc, edges[:, 1], weights[edges[:, 0]])
+        weights = 0.5 * weights + 0.5 * acc / deg[:, None]
+    total = weights.sum(1, keepdims=True)
+    total[total == 0] = 1
+    weights /= total
+    all_idx = list(range(n))
+    for gi, g in enumerate(groups):
+        g.remove(all_idx)
+        for vi in np.nonzero(weights[:, gi] > 1e-4)[0]:
+            g.add([int(vi)], float(weights[vi, gi]), "REPLACE")
 
 
 def clean_name(path: str) -> str:
@@ -38,7 +70,9 @@ def main() -> None:
     p.add_argument("--fbx", nargs="+", required=True)
     p.add_argument("--front", required=True)
     p.add_argument("--back")
+    p.add_argument("--side")
     p.add_argument("--out", required=True)
+    p.add_argument("--smooth-weights", type=int, default=4, help="Laplacian passes over bone weights (0 = off)")
     p.add_argument("--depth-scale", type=float, default=1.0, help="thin the mesh front-to-back (bones stay put)")
     a = script_args(p)
 
@@ -91,7 +125,8 @@ def main() -> None:
 
     front = load_image(os.path.abspath(a.front))
     back = load_image(os.path.abspath(a.back)) if a.back else None
-    for img in (front, back):
+    side = load_image(os.path.abspath(a.side)) if a.side else None
+    for img in (front, back, side):
         if img is not None:
             img.pack()
     for mesh in character_meshes:
@@ -99,10 +134,13 @@ def main() -> None:
         if UV_FRONT not in uvs and len(uvs):
             uvs[0].name = UV_FRONT  # Mixamo kept the coordinates but not the name
         has_back = back is not None and UV_BACK in uvs
-        mat = build_projection_material(f"{mesh.name}_paint", front, back if has_back else None)
+        has_side = side is not None and UV_SIDE in uvs
+        mat = build_projection_material(f"{mesh.name}_paint", front, back if has_back else None, side if has_side else None)
         assign_material(mesh, mat)
         if back is not None and not has_back:
             print("PF_WARN back UV map missing after Mixamo; using the front image only")
+        if a.smooth_weights > 0 and character_arm is not None:
+            smooth_weights(mesh, a.smooth_weights)
 
     actions = sorted(act.name for act in bpy.data.actions)
     out = os.path.abspath(a.out)

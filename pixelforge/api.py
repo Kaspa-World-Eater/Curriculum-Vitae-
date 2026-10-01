@@ -22,7 +22,7 @@ from PIL import Image
 from . import cleanup
 from . import godot as godot_export
 from .animate import PRESETS, animate
-from .model_spec import build_spec, write_spec
+from .model_spec import build_hull_spec, build_spec, write_spec
 from .palette import Palette
 from .pixelate import PixelateOptions, pixelate, pixelate_frames
 from .project import DIRECTIONS_8, SOURCE_KINDS, Character, Project, slugify
@@ -240,7 +240,7 @@ def model_textures(project: Project, c: Character) -> dict[str, Path]:
     """Edge-padded copies of the view cutouts, for use as 3D textures."""
     views = project.sub(c.name, "views")
     out = {}
-    for kind in ("front", "back"):
+    for kind in ("front", "back", "side"):
         src = views / f"{kind}.png"
         if src.exists():
             tex = project.sub(c.name, "model") / f"tex_{kind}.png"
@@ -259,17 +259,22 @@ def build_model(project: Project, name: str, height: float = 1.8, columns: int =
     if not front.exists():
         raise StepError("run split first (no views/front.png)")
     side = views / "side.png"
-    spec = build_spec(Image.open(front), Image.open(side) if side.exists() else None, columns=columns, thickness=thickness)
-    # a side view includes the cloak's flare; the body itself is thinner
-    spec["thickness"] = float(min(spec["thickness"] * 0.6, 0.3))
+    back = views / "back.png"
+    if side.exists():
+        # carve a proper 3D shape from the front + side silhouettes
+        spec = build_hull_spec(Image.open(front), Image.open(side), Image.open(back) if back.exists() else None, columns=columns)
+    else:
+        spec = build_spec(Image.open(front), None, columns=columns, thickness=thickness)
+        spec["thickness"] = float(min(spec["thickness"], 0.3))
     model_dir = project.sub(c.name, "model")
     spec_path = write_spec(spec, model_dir / f"{c.name}_spec.json")
     blend = model_dir / f"{c.name}.blend"
     fbx = model_dir / f"{c.name}.fbx"
     tex = model_textures(project, c)
     args = ["--spec", spec_path, "--front", tex["front"], "--height", height, "--name", c.name, "--out", blend, "--fbx", fbx]
-    if "back" in tex:
-        args += ["--back", tex["back"]]
+    for kind in ("back", "side"):
+        if kind in tex:
+            args += [f"--{kind}", tex[kind]]
     result = run_blender(project, "build_mesh.py", args, log=log)
     c.done["model"] = True
     c.notes["model"] = result
@@ -301,8 +306,9 @@ def import_mixamo(project: Project, name: str, depth_scale: float | None = None,
         raise StepError("run split first (no views/front.png)")
     out = project.sub(c.name, "model") / f"{c.name}_rigged.blend"
     args = ["--fbx", *files, "--front", tex["front"], "--out", out]
-    if "back" in tex:
-        args += ["--back", tex["back"]]
+    for kind in ("back", "side"):
+        if kind in tex:
+            args += [f"--{kind}", tex[kind]]
     if depth_scale:
         args += ["--depth-scale", depth_scale]
     result = run_blender(project, "import_animations.py", args, log=log)

@@ -13,6 +13,7 @@ import bpy  # type: ignore
 
 UV_FRONT = "proj_front"
 UV_BACK = "proj_back"
+UV_SIDE = "proj_side"
 
 
 def script_args(parser: argparse.ArgumentParser) -> argparse.Namespace:
@@ -72,8 +73,37 @@ def ortho_scale_for_height(image, height: float) -> float:
     return height if ih >= iw else height * iw / ih
 
 
-def build_projection_material(name: str, front_img, back_img=None, blend: float = 0.15):
-    """Unlit material showing the front image on front-facing parts, back on the rest."""
+def _mix_rgb(nt, fac, color_a, color_b):
+    """Mix node: factor 0 -> a, 1 -> b (Blender 4 ShaderNodeMix, legacy fallback)."""
+    try:
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        nt.links.new(fac, mix.inputs[0])
+        nt.links.new(color_a, mix.inputs[6])
+        nt.links.new(color_b, mix.inputs[7])
+        return mix.outputs[2]
+    except (RuntimeError, KeyError, IndexError):
+        mix = nt.nodes.new("ShaderNodeMixRGB")
+        nt.links.new(fac, mix.inputs["Fac"])
+        nt.links.new(color_a, mix.inputs["Color1"])
+        nt.links.new(color_b, mix.inputs["Color2"])
+        return mix.outputs["Color"]
+
+
+def _image_node(nt, image, uv_name):
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = image
+    tex.interpolation = "Closest" if max(image.size) < 600 else "Linear"
+    tex.extension = "EXTEND"
+    uv = nt.nodes.new("ShaderNodeUVMap")
+    uv.uv_map = uv_name
+    nt.links.new(uv.outputs["UV"], tex.inputs["Vector"])
+    return tex
+
+
+def build_projection_material(name: str, front_img, back_img=None, side_img=None, blend: float = 0.15):
+    """Unlit material: front image on front-facing parts, back on the rest,
+    and (if given) the side image where the surface faces sideways."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -83,51 +113,37 @@ def build_projection_material(name: str, front_img, back_img=None, blend: float 
     emit.inputs["Strength"].default_value = 1.0
     nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
 
-    tex_front = nt.nodes.new("ShaderNodeTexImage")
-    tex_front.image = front_img
-    tex_front.interpolation = "Closest" if max(front_img.size) < 600 else "Linear"
-    tex_front.extension = "EXTEND"
-    uv_front = nt.nodes.new("ShaderNodeUVMap")
-    uv_front.uv_map = UV_FRONT
-    nt.links.new(uv_front.outputs["UV"], tex_front.inputs["Vector"])
+    tex_front = _image_node(nt, front_img, UV_FRONT)
     mat.node_tree.nodes.active = tex_front
+    color = tex_front.outputs["Color"]
 
-    if back_img is None:
-        nt.links.new(tex_front.outputs["Color"], emit.inputs["Color"])
-        return mat
-
-    tex_back = nt.nodes.new("ShaderNodeTexImage")
-    tex_back.image = back_img
-    tex_back.extension = "EXTEND"
-    uv_back = nt.nodes.new("ShaderNodeUVMap")
-    uv_back.uv_map = UV_BACK
-    nt.links.new(uv_back.outputs["UV"], tex_back.inputs["Vector"])
-
-    # facing = normal . (0, -1, 0): +1 straight at the front camera, -1 at the back
     geo = nt.nodes.new("ShaderNodeNewGeometry")
-    dot = nt.nodes.new("ShaderNodeVectorMath")
-    dot.operation = "DOT_PRODUCT"
-    dot.inputs[1].default_value = (0.0, -1.0, 0.0)
-    nt.links.new(geo.outputs["Normal"], dot.inputs[0])
-    ramp = nt.nodes.new("ShaderNodeMapRange")
-    ramp.inputs["From Min"].default_value = -blend
-    ramp.inputs["From Max"].default_value = blend
-    ramp.clamp = True
-    nt.links.new(dot.outputs["Value"], ramp.inputs["Value"])
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Normal"], sep.inputs["Vector"])
 
-    try:
-        mix = nt.nodes.new("ShaderNodeMix")
-        mix.data_type = "RGBA"
-        nt.links.new(ramp.outputs["Result"], mix.inputs[0])
-        nt.links.new(tex_back.outputs["Color"], mix.inputs[6])  # A: factor 0 = back
-        nt.links.new(tex_front.outputs["Color"], mix.inputs[7])  # B: factor 1 = front
-        nt.links.new(mix.outputs[2], emit.inputs["Color"])
-    except (RuntimeError, KeyError, IndexError):
-        mix = nt.nodes.new("ShaderNodeMixRGB")
-        nt.links.new(ramp.outputs["Result"], mix.inputs["Fac"])
-        nt.links.new(tex_back.outputs["Color"], mix.inputs["Color1"])
-        nt.links.new(tex_front.outputs["Color"], mix.inputs["Color2"])
-        nt.links.new(mix.outputs["Color"], emit.inputs["Color"])
+    if back_img is not None:
+        tex_back = _image_node(nt, back_img, UV_BACK)
+        # facing: normal.y < 0 looks at the front camera
+        ramp = nt.nodes.new("ShaderNodeMapRange")
+        ramp.inputs["From Min"].default_value = blend
+        ramp.inputs["From Max"].default_value = -blend
+        ramp.clamp = True
+        nt.links.new(sep.outputs["Y"], ramp.inputs["Value"])
+        color = _mix_rgb(nt, ramp.outputs["Result"], tex_back.outputs["Color"], color)
+
+    if side_img is not None:
+        tex_side = _image_node(nt, side_img, UV_SIDE)
+        absx = nt.nodes.new("ShaderNodeMath")
+        absx.operation = "ABSOLUTE"
+        nt.links.new(sep.outputs["X"], absx.inputs[0])
+        ramp_s = nt.nodes.new("ShaderNodeMapRange")
+        ramp_s.inputs["From Min"].default_value = 0.45
+        ramp_s.inputs["From Max"].default_value = 0.85
+        ramp_s.clamp = True
+        nt.links.new(absx.outputs["Value"], ramp_s.inputs["Value"])
+        color = _mix_rgb(nt, ramp_s.outputs["Result"], color, tex_side.outputs["Color"])
+
+    nt.links.new(color, emit.inputs["Color"])
     return mat
 
 

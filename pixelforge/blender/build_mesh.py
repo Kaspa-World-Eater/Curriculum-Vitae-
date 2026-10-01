@@ -23,6 +23,7 @@ import bpy  # type: ignore
 from pf_common import (  # noqa: E402
     UV_BACK,
     UV_FRONT,
+    UV_SIDE,
     assign_material,
     build_projection_material,
     deg,
@@ -89,11 +90,71 @@ def build_mesh_from_spec(spec: dict, height: float, name: str):
     return obj, width
 
 
+def build_hull_from_spec(spec: dict, height: float, name: str):
+    """Voxel visual hull -> boundary quads -> merged, smoothed mesh."""
+    import numpy as np
+
+    rows, dcols, cols = spec["rows"], spec["depth_columns"], spec["columns"]
+    vox = np.array([[[c == "1" for c in row] for row in layer] for layer in spec["voxels"]], dtype=bool)  # z, y, x
+    width = height * spec["aspect"]
+    depth = height * spec["thickness"]
+    cx, cy, cz = width / cols, depth / dcols, height / rows
+    pad = np.pad(vox, 1)
+    verts: list = []
+    faces: list = []
+    index: dict = {}
+
+    def vid(i, j, k):  # grid corner -> vertex (x = i, y = j, z = k)
+        key = (i, j, k)
+        if key not in index:
+            index[key] = len(verts)
+            verts.append((-width / 2 + i * cx, -depth / 2 + j * cy, height - k * cz))
+        return index[key]
+
+    # for each filled voxel, emit the faces whose neighbour is empty
+    zs, ys, xs = np.nonzero(vox)
+    for z, y, x in zip(zs, ys, xs):
+        pz, py, px = z + 1, y + 1, x + 1
+        if not pad[pz, py - 1, px]:  # -y (front)
+            faces.append([vid(x, y, z), vid(x, y, z + 1), vid(x + 1, y, z + 1), vid(x + 1, y, z)])
+        if not pad[pz, py + 1, px]:  # +y (back)
+            faces.append([vid(x, y + 1, z), vid(x + 1, y + 1, z), vid(x + 1, y + 1, z + 1), vid(x, y + 1, z + 1)])
+        if not pad[pz, py, px - 1]:  # -x
+            faces.append([vid(x, y, z), vid(x, y + 1, z), vid(x, y + 1, z + 1), vid(x, y, z + 1)])
+        if not pad[pz, py, px + 1]:  # +x
+            faces.append([vid(x + 1, y, z), vid(x + 1, y, z + 1), vid(x + 1, y + 1, z + 1), vid(x + 1, y + 1, z)])
+        if not pad[pz - 1, py, px]:  # top (z index smaller = higher)
+            faces.append([vid(x, y, z), vid(x + 1, y, z), vid(x + 1, y + 1, z), vid(x, y + 1, z)])
+        if not pad[pz + 1, py, px]:  # bottom
+            faces.append([vid(x, y, z + 1), vid(x, y + 1, z + 1), vid(x + 1, y + 1, z + 1), vid(x + 1, y, z + 1)])
+
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # round off the voxel steps, then bake so Mixamo gets the smooth shape
+    sm = obj.modifiers.new("pf_round", "SMOOTH")
+    sm.factor = 1.0
+    sm.iterations = 6
+    bpy.ops.object.modifier_apply(modifier=sm.name)
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    return obj, width
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--spec", required=True)
     p.add_argument("--front", required=True)
     p.add_argument("--back")
+    p.add_argument("--side", help="side view image, painted onto the sides (hull models)")
     p.add_argument("--height", type=float, default=1.8, help="character height in metres")
     p.add_argument("--name", default="Character")
     p.add_argument("--smooth", type=int, default=1, help="subdivision levels (0 = blocky)")
@@ -103,10 +164,14 @@ def main() -> None:
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     spec = json.load(open(a.spec))
-    obj, _width = build_mesh_from_spec(spec, a.height, a.name)
+    if spec.get("mode") == "hull":
+        obj, _width = build_hull_from_spec(spec, a.height, a.name)
+    else:
+        obj, _width = build_mesh_from_spec(spec, a.height, a.name)
 
     front = load_image(os.path.abspath(a.front))
     back = load_image(os.path.abspath(a.back)) if a.back else None
+    side = load_image(os.path.abspath(a.side)) if a.side else None
 
     # cameras framing the silhouette exactly: the cutouts are tight-cropped, and
     # the mesh spans the same box, so the image maps onto the body 1:1 (fitted
@@ -116,15 +181,21 @@ def main() -> None:
     if back is not None:
         cam_b = make_ortho_camera("pf_cam_back", (0, 10, a.height / 2), (deg(90), 0, deg(180)), ortho_scale_for_height(back, a.height))
         project_image_onto(obj, back, UV_BACK, cam_b)
+    if side is not None:
+        # from +X looking -X the character's front (-Y) is on the image's left,
+        # matching a side view that faces left; the projection goes through the
+        # body so the -X side receives the same (correct) mapping.
+        cam_s = make_ortho_camera("pf_cam_side", (10, 0, a.height / 2), (deg(90), 0, deg(90)), ortho_scale_for_height(side, a.height))
+        project_image_onto(obj, side, UV_SIDE, cam_s)
 
-    mat = build_projection_material(f"{a.name}_paint", front, back)
+    mat = build_projection_material(f"{a.name}_paint", front, back, side)
     assign_material(obj, mat)
 
     if a.smooth > 0:
         sub = obj.modifiers.new("pf_smooth", "SUBSURF")
         sub.levels = sub.render_levels = a.smooth
 
-    for img in (front, back):
+    for img in (front, back, side):
         if img is not None:
             img.pack()
 

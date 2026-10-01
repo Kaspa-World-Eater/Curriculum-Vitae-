@@ -180,3 +180,30 @@ palette and a fixed scale so all frames match.
 - Don't re-run `render` for a tweak that `pixelate` can do (style, outline).
 - Don't promise animation from Midjourney alone: frame-to-frame consistency
   needs the 3D path.
+
+## Doing the Mixamo step yourself (local session with a browser)
+
+If you run on the person's computer with a browser tool (Playwright/Chromium in
+Claude Code, or the Chrome extension), you can do the rig step instead of the
+person. Ask them to sign in to Adobe in the browser you open; then:
+
+1. Open https://www.mixamo.com/#/?page=1&type=Character → **Upload Character** →
+   choose `characters/<name>/model/<name>.fbx`.
+2. Auto-rigger, *Orient*: the model must face forward (hood point up, front
+   toward you). Click **Next**.
+3. *Markers*: drag the circles onto the model. For a robed humanoid without
+   visible legs: chin just under the face opening (~30% from the top), wrists
+   on the hand tips at the sides (~55% down), elbows halfway between shoulder
+   and wrist, knees on the robe at ~75% down left and right, groin at the
+   centre ~60% down. Skeleton LOD: Standard. **Next**, wait for the preview,
+   **Next**, **Finish**.
+4. Animations tab: search and select each of `Idle`, `Walking` (tick **In
+   Place**), `Running` (In Place), `Standing Melee Attack Downward` or
+   `Sword And Shield Slash`, `Hit Reaction`, `Standing Death Forward`.
+5. **Download** each: Format *FBX Binary(.fbx)*, Frames per Second *30*, Keyframe
+   Reduction *none*. Skin: **With Skin** for the FIRST download only, **Without
+   Skin** for all others. Save every file to `characters/<name>/mixamo/`.
+6. `pixelforge project run-all <name>`.
+
+If marker placement fails twice, fall back to telling the person the
+positions above and let them drag; it takes them a minute.
