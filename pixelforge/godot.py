@@ -20,31 +20,37 @@ def _res_path(res_dir: str, filename: str) -> str:
 
 
 def sprite_frames_tres(sheet: SpriteSheet, texture_res_path: str) -> str:
-    used = sorted({i for a in sheet.animations for i in a.frames})
-    sub_ids = {i: f"AtlasTexture_{i}" for i in used}
-    lines = [
-        f'[gd_resource type="SpriteFrames" load_steps={len(used) + 2} format=3]',
-        "",
-        f'[ext_resource type="Texture2D" path="{texture_res_path}" id="1_sheet"]',
-        "",
-    ]
-    for i in used:
-        x, y, w, h = sheet.rect(i)
-        lines += [
-            f'[sub_resource type="AtlasTexture" id="{sub_ids[i]}"]',
-            'atlas = ExtResource("1_sheet")',
-            f"region = Rect2({x}, {y}, {w}, {h})",
-            "",
-        ]
-    anim_blocks = []
-    for a in sheet.animations:
-        frames = ", ".join(
-            '{\n"duration": 1.0,\n"texture": SubResource("%s")\n}' % sub_ids[i] for i in a.frames
-        )
-        anim_blocks.append(
-            '{\n"frames": [%s],\n"loop": %s,\n"name": &"%s",\n"speed": %s\n}'
-            % (frames, "true" if a.loop else "false", a.name, float(a.fps))
-        )
+    return sprite_frames_tres_multi([(sheet, texture_res_path)])
+
+
+def sprite_frames_tres_multi(sheets: list[tuple[SpriteSheet, str]]) -> str:
+    """One SpriteFrames resource over several sheet textures."""
+    ext_lines, sub_lines, anim_blocks = [], [], []
+    n_sub = 0
+    for si, (sheet, tex_path) in enumerate(sheets):
+        ext_id = f"{si + 1}_sheet"
+        ext_lines.append(f'[ext_resource type="Texture2D" path="{tex_path}" id="{ext_id}"]')
+        used = sorted({i for a in sheet.animations for i in a.frames})
+        sub_ids = {i: f"AtlasTexture_{si}_{i}" for i in used}
+        for i in used:
+            x, y, w, h = sheet.rect(i)
+            sub_lines += [
+                f'[sub_resource type="AtlasTexture" id="{sub_ids[i]}"]',
+                f'atlas = ExtResource("{ext_id}")',
+                f"region = Rect2({x}, {y}, {w}, {h})",
+                "",
+            ]
+            n_sub += 1
+        for a in sheet.animations:
+            frames = ", ".join(
+                '{\n"duration": 1.0,\n"texture": SubResource("%s")\n}' % sub_ids[i] for i in a.frames
+            )
+            anim_blocks.append(
+                '{\n"frames": [%s],\n"loop": %s,\n"name": &"%s",\n"speed": %s\n}'
+                % (frames, "true" if a.loop else "false", a.name, float(a.fps))
+            )
+    lines = [f'[gd_resource type="SpriteFrames" load_steps={n_sub + len(sheets) + 1} format=3]', ""]
+    lines += ext_lines + [""] + sub_lines
     lines += ["[resource]", "animations = [" + ", ".join(anim_blocks) + "]", ""]
     return "\n".join(lines)
 
@@ -67,19 +73,40 @@ def scene_tscn(node_name: str, frames_res_path: str, default_animation: str) -> 
 
 
 def export(sheet: SpriteSheet, out_dir: str | Path, name: str, res_dir: str) -> dict[str, Path]:
-    """Write ``name.png``, ``name.json``, ``name.tres`` and ``name.tscn`` into ``out_dir``.
+    """Write ``name.png``, ``name.json``, ``name.tres`` and ``name.tscn`` into ``out_dir``."""
+    return export_multi({name: sheet}, out_dir, name, res_dir)
+
+
+def export_multi(sheets: dict[str, SpriteSheet], out_dir: str | Path, name: str, res_dir: str) -> dict[str, Path]:
+    """Several sheets (e.g. one per action, each under Godot's texture limit)
+    -> one ``name.tres`` SpriteFrames + ``name.tscn`` + a ``name.json`` index.
 
     ``res_dir`` is the ``res://`` path that ``out_dir`` corresponds to inside the
     Godot project, e.g. ``res://sprites/knight``.
     """
+    import json
+
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    png = out / f"{name}.png"
-    meta = sheet.save(png)
+    pairs, index = [], {"sheets": {}, "animations": {}}
+    files: dict[str, Path] = {}
+    for sheet_name, sheet in sheets.items():
+        png = out / f"{sheet_name}.png"
+        sheet.save(png)
+        files[f"png:{sheet_name}"] = png
+        pairs.append((sheet, _res_path(res_dir, png.name)))
+        meta = sheet.metadata(png.name)
+        index["sheets"][sheet_name] = {k: meta[k] for k in ("image", "frame_width", "frame_height", "columns")}
+        for anim, data in meta["animations"].items():
+            index["animations"][anim] = {"sheet": sheet_name, **data}
     tres = out / f"{name}.tres"
-    tres.write_text(sprite_frames_tres(sheet, _res_path(res_dir, png.name)))
+    tres.write_text(sprite_frames_tres_multi(pairs))
     tscn = out / f"{name}.tscn"
-    default = sheet.animations[0].name if sheet.animations else "default"
+    first = next((a for s in sheets.values() for a in s.animations), None)
+    default = first.name if first else "default"
     node = "".join(p.capitalize() for p in name.replace("-", "_").split("_"))
     tscn.write_text(scene_tscn(node, _res_path(res_dir, tres.name), default))
-    return {"png": png, "json": meta, "tres": tres, "tscn": tscn}
+    meta_path = out / f"{name}.json"
+    meta_path.write_text(json.dumps(index, indent=2) + "\n")
+    files.update({"json": meta_path, "tres": tres, "tscn": tscn, "png": files.get(f"png:{name}", next(iter(files.values())))})
+    return files

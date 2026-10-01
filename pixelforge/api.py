@@ -495,17 +495,27 @@ def export(project: Project, name: str, fps: float | None = None) -> dict:
         files = sorted(clip.glob("frame_*.png"))
         if files:
             clips[clip.name] = [Image.open(f) for f in files]
-    for anim in sorted(project.sub(c.name, "anim").glob("*/")):
-        files = sorted(anim.glob("frame_*.png"))
-        if files:
-            clips[f"still_{anim.name}"] = [Image.open(f) for f in files]
+    if not clips:  # quick path only: the procedural clips made from a still
+        for anim in sorted(project.sub(c.name, "anim").glob("*/")):
+            files = sorted(anim.glob("frame_*.png"))
+            if files:
+                clips[f"still_{anim.name}"] = [Image.open(f) for f in files]
     if not clips:
         raise StepError("nothing to export; run pixelate (3D path) or animate (still path) first")
-    sheet = pack(clips, fps=clip_fps)
+    # one sheet per action (its 8 directions as rows) keeps every texture far
+    # below Godot's 16384 px limit and lets a clip batch in one draw call
+    groups: dict[str, dict[str, list]] = {}
+    for clip_name, frames in clips.items():
+        action = clip_name.rsplit("_", 1)[0] if "_" in clip_name else clip_name
+        groups.setdefault(action, {})[clip_name] = frames
+    sheets = {f"{c.name}_{action}": pack(group, fps=clip_fps) for action, group in groups.items()}
     out = project.sub(c.name, "export")
-    files = godot_export.export(sheet, out, c.name, f"{project.godot_res_dir.rstrip('/')}/{c.name}")
+    for old in out.glob("*.png"):
+        old.unlink()
+    files = godot_export.export_multi(sheets, out, c.name, f"{project.godot_res_dir.rstrip('/')}/{c.name}")
+    biggest = max(s.image.height for s in sheets.values())
     c.done["export"] = True
-    c.notes["export"] = f"{len(clips)} clips, sheet {sheet.image.width}x{sheet.image.height}"
+    c.notes["export"] = f"{len(clips)} clips in {len(sheets)} sheets (tallest {biggest}px)"
     project.save()
     return {
         "ok": True,
