@@ -20,9 +20,9 @@ Two paths share the first steps:
 - **Full path**: sheet → model → Mixamo (person) → render → pixelate → export.
   Gives every animation from 8 directions with one consistent look.
 
-Steps needing a person (you cannot do them): making Midjourney images,
-uploading to Mixamo and downloading the FBX files, installing Blender.
-Everything else is yours.
+Steps needing a person (you cannot do them): making Midjourney images and
+installing Blender. Everything else is yours; the pipeline runs unattended.
+Mixamo is optional (mocap upgrade), never required.
 
 ## Install / environment
 
@@ -79,7 +79,7 @@ pixelforge project import <character> sheet|front|back|side|style <file>
 pixelforge project run <character> split
 pixelforge project run <character> palette
 pixelforge project run <character> model          # needs Blender; writes model/<name>.fbx for Mixamo
-pixelforge project run <character> rig            # needs mixamo/*.fbx from the person
+pixelforge project run <character> rig            # built-in rig + clips; uses mixamo/*.fbx instead if present
 pixelforge project run <character> render [--frame-step 2] [--elevation 30]
 pixelforge project run <character> pixelate
 pixelforge project run <character> export
@@ -113,12 +113,13 @@ pixelforge prompt --describe "<sentence>" [--kind sheet|front|back|sprite|item]
 5. `still <name> --view style --animate idle --export` — show them the result
    immediately (`sprites/style_x4.png`, `anim/idle/preview.gif`). Adjust the
    style tier if they want chunkier/finer (`set --style ...`, rerun).
-6. `run-all <name>`. It runs split → palette → model, then stops with the
-   Mixamo instructions. Relay them to the person exactly as printed
-   (upload `model/<name>.fbx`, place markers, pick animations, first download
-   *With Skin*, the rest *Without Skin*, 30 fps, save to `mixamo/`).
-7. When the FBX files are in place: `run-all <name>` again → rig → render →
-   pixelate → export. Rendering prints `PF_PROGRESS` lines; it takes minutes.
+6. `run-all <name>`. It runs split → palette → model → rig → render →
+   pixelate → export without stopping (only Blender missing stops it).
+   Rendering prints `PF_PROGRESS` lines; ~1 s per frame on CPU, so 6 clips x
+   8 directions is 10-20 minutes. Run it in the background and check back.
+7. Optional mocap upgrade: if the person provides Mixamo FBX files in
+   `mixamo/`, rerun `rig` (then render/pixelate/export); they replace the
+   built-in clips.
 8. Tell the person where the Godot files are (`export/`) and how to use them
    (copy the folder to `res://sprites/<name>/`, instance `<name>.tscn`).
 
@@ -144,7 +145,7 @@ pixelforge prompt --describe "<sentence>" [--kind sheet|front|back|sprite|item]
 | message | action |
 |---|---|
 | `Blender was not found` | ask the person to install Blender or give the path; `set --blender` |
-| `no .fbx files in .../mixamo` | the person hasn't done the Mixamo step yet |
+| `no .fbx files in .../mixamo` | only from `import_mixamo` directly; use `run ... rig` (built-in) instead |
 | `none of the FBX files carried a mesh` | one download must be *With Skin* |
 | `could not identify a front view` | import a separate front image (prompt B1) |
 | `no reliable pixel grid` (note, not an error) | expected for AI images; the style tier decides the size |

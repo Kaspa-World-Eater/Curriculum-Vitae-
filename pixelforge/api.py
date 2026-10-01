@@ -26,6 +26,7 @@ from .model_spec import build_hull_spec, build_spec, write_spec
 from .palette import Palette
 from .pixelate import PixelateOptions, pixelate, pixelate_frames
 from .project import DIRECTIONS_8, SOURCE_KINDS, Character, Project, slugify
+from .rig import estimate_skeleton, write_skeleton
 from .prompts import PROMPT_KINDS, RULES, build_all
 from .sheet import cutout, normalize_heights, split_sheet
 from .spritesheet import pack, save_gif
@@ -287,12 +288,36 @@ def build_model(project: Project, name: str, height: float = 1.8, columns: int =
         "fbx": str(fbx),
         "next": "rig",
         "instructions": (
-            f"Upload {fbx.name} to mixamo.com (free). Place the markers on the chin, wrists, elbows, "
-            f"knees and groin. Pick animations (idle, walk, run, attack, hit, death). Download the first "
-            f"one as FBX 'with skin', the others 'without skin', 24 or 30 fps, and put them all in "
-            f"{project.sub(c.name, 'mixamo')}. Then run the rig step."
+            "Next, the rig step adds a skeleton and the built-in animations automatically. "
+            f"(Optional upgrade: upload {fbx.name} to mixamo.com for motion-capture animations and put the "
+            f"downloaded FBX files in {project.char_dir(c.name) / 'mixamo'} before running rig.)"
         ),
     }
+
+
+DEFAULT_CLIPS = "idle,walk,run,attack,hit,death"
+
+
+def rig(project: Project, name: str, clips: str = DEFAULT_CLIPS, log=None) -> dict:
+    """Rig + animate. Uses Mixamo FBX files if the person dropped any in
+    ``mixamo/``; otherwise the built-in auto-rig and animation library."""
+    c = project.character(name)
+    mix = project.char_dir(c.name) / "mixamo"
+    if mix.exists() and (list(mix.glob("*.fbx")) or list(mix.glob("*.FBX"))):
+        return import_mixamo(project, name, log=log)
+    model = project.sub(c.name, "model")
+    blend = model / f"{c.name}.blend"
+    if not blend.exists():
+        raise StepError("no model yet; run the model step")
+    front = project.sub(c.name, "views") / "front.png"
+    skel = write_skeleton(estimate_skeleton(Image.open(front)), model / f"{c.name}_skeleton.json")
+    out = model / f"{c.name}_rigged.blend"
+    result = run_blender(project, "rig_character.py", ["--skeleton", skel, "--out", out, "--clips", clips], blend=blend, log=log)
+    actions = result.split("actions=")[-1].split(" ")[0].split(",") if "actions=" in result else []
+    c.done["rig"] = True
+    c.notes["rig"] = f"built-in rig, {len(actions)} animations: {', '.join(actions)}"
+    project.save()
+    return {"ok": True, "character": c.name, "blend": str(out), "animations": actions, "source": "built-in", "next": "render"}
 
 
 def import_mixamo(project: Project, name: str, depth_scale: float | None = None, log=None) -> dict:
@@ -475,7 +500,7 @@ STEP_FUNCS = {
     "split": split,
     "palette": make_palette,
     "model": build_model,
-    "rig": import_mixamo,
+    "rig": rig,
     "render": render,
     "pixelate": pixelate_renders,
     "export": export,

@@ -12,7 +12,8 @@ Runs on any Windows laptop. No graphics card needed.
 
 Optional, only for the 3D/animation path:
 - **Blender** (free, blender.org). Install it normally; the app finds it.
-- A free **Mixamo** account (mixamo.com) for rigging and animations.
+  Nothing else: rigging and animations are built in. (Mixamo is an optional
+  upgrade for motion-capture animations.)
 
 ## The two paths
 
@@ -43,19 +44,15 @@ the game.
 2. Step **2. Import** → *A. Character sheet*. Also import the *C* image if you
    made one — it gives the best colors.
 3. Click **▶ Run all automatic steps**. The app splits the sheet, locks the
-   palette, builds the 3D model and writes an `.fbx` file. It then stops and
-   tells you to go to Mixamo.
-4. **Mixamo** (the one manual step, ~5 minutes):
-   - Upload the `.fbx` from `characters/<name>/model/`.
-   - Place the markers (chin, wrists, elbows, knees, groin). Next.
-   - Pick animations: search *idle*, *walking*, *running*, *sword slash*,
-     *hit reaction*, *death*.
-   - Download the **first** one as FBX **With Skin**, all others **Without
-     Skin**, 30 fps.
-   - Put every `.fbx` into `characters/<name>/mixamo/`.
-5. Click **▶ Run all automatic steps** again. Blender renders every animation
-   from 8 directions, the app pixelates them and exports the Godot files.
-   Rendering takes a few minutes; watch the Log panel.
+   palette, builds the 3D model, rigs it, gives it idle / walk / run / attack /
+   hit / death, renders everything from 8 directions, pixelates the frames and
+   exports the Godot files. Rendering takes a while (hundreds of frames);
+   watch the Log panel. Nothing to click in between.
+
+   Optional upgrade: for motion-capture animations, upload
+   `characters/<name>/model/<name>.fbx` to mixamo.com, download animations
+   (first *With Skin*, rest *Without Skin*) into `characters/<name>/mixamo/`
+   and run the rig step again — the app uses them instead of the built-in set.
 
 ## Knobs you might touch
 
