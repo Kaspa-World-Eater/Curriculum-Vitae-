@@ -47,6 +47,24 @@ def render_to(path: str, size: int) -> None:
     bpy.ops.render.render(write_still=True)
 
 
+def anchor_xy(arm, meshes) -> tuple[float, float]:
+    """Ground-plane point the camera orbits: the hips bone if there is one, else
+    the mesh centre.  Following it keeps a walk that is not 'in place' centred."""
+    if arm is not None:
+        for name in ("mixamorig:Hips", "mixamorig1:Hips", "Hips", "hips", "pelvis", "Pelvis"):
+            pb = arm.pose.bones.get(name)
+            if pb is not None:
+                w = arm.matrix_world @ pb.head
+                return float(w.x), float(w.y)
+    lo = [math.inf] * 2
+    hi = [-math.inf] * 2
+    for m in meshes:
+        l, h = bbox_world(m)
+        lo = [min(lo[i], l[i]) for i in range(2)]
+        hi = [max(hi[i], h[i]) for i in range(2)]
+    return (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+
+
 def direction_names(n: int) -> list[str]:
     if n == 8:
         return DIRECTIONS
@@ -96,11 +114,15 @@ def main() -> None:
         frame_plan.append((act, frames))
         for f in frames[:: max(1, len(frames) // 12)]:  # sample for speed
             scene.frame_set(f)
+            ax, ay = anchor_xy(arm, meshes)
             for m in meshes:
                 lo, hi = bbox_world(m)
+                lo = [lo[0] - ax, lo[1] - ay, lo[2]]
+                hi = [hi[0] - ax, hi[1] - ay, hi[2]]
                 lo_all = [min(x, y) for x, y in zip(lo_all, lo)]
                 hi_all = [max(x, y) for x, y in zip(hi_all, hi)]
-    radius = max(abs(lo_all[0]), abs(hi_all[0]), abs(lo_all[1]), abs(hi_all[1])) * math.sqrt(2)
+    # anything within this XY distance of the anchor stays in frame at any yaw
+    radius = math.hypot(max(abs(lo_all[0]), abs(hi_all[0])), max(abs(lo_all[1]), abs(hi_all[1])))
     z_span = hi_all[2] - lo_all[2]
     z_mid = (hi_all[2] + lo_all[2]) / 2
     elev = deg(a.elevation)
@@ -153,9 +175,10 @@ def main() -> None:
         manifest["actions"][act_name] = {"frames": len(frames), "source_frames": frames}
         for fi, f in enumerate(frames):
             scene.frame_set(f)
+            ax, ay = anchor_xy(arm, meshes)
             for di, dname in enumerate(names):
                 yaw = 2 * math.pi * di / a.directions
-                cam.location = (dist * math.cos(elev) * math.sin(yaw), -dist * math.cos(elev) * math.cos(yaw), z_mid + dist * math.sin(elev))
+                cam.location = (ax + dist * math.cos(elev) * math.sin(yaw), ay - dist * math.cos(elev) * math.cos(yaw), z_mid + dist * math.sin(elev))
                 cam.rotation_euler = (deg(90) - elev, 0, yaw)
                 path = os.path.join(out_root, act_name, dname, f"frame_{fi:03d}.png")
                 os.makedirs(os.path.dirname(path), exist_ok=True)

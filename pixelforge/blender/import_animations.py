@@ -39,6 +39,7 @@ def main() -> None:
     p.add_argument("--front", required=True)
     p.add_argument("--back")
     p.add_argument("--out", required=True)
+    p.add_argument("--depth-scale", type=float, default=1.0, help="thin the mesh front-to-back (bones stay put)")
     a = script_args(p)
 
     files = sorted({f for pat in a.fbx for f in glob.glob(pat)})
@@ -73,6 +74,20 @@ def main() -> None:
         raise SystemExit("none of the FBX files carried a mesh: download one animation 'with skin'")
     if character_arm is None:
         print("PF_WARN no armature found: the model is not rigged, only a still can be rendered")
+
+    if a.depth_scale != 1.0:
+        from mathutils import Vector  # type: ignore
+
+        for mesh in character_meshes:
+            mw = mesh.matrix_world
+            inv = mw.inverted()
+            ys = [(mw @ v.co).y for v in mesh.data.vertices]
+            mid = (min(ys) + max(ys)) / 2
+            for v in mesh.data.vertices:
+                w = mw @ v.co
+                w.y = mid + (w.y - mid) * a.depth_scale
+                v.co = inv @ w
+        print(f"PF_INFO depth scaled by {a.depth_scale}")
 
     front = load_image(os.path.abspath(a.front))
     back = load_image(os.path.abspath(a.back)) if a.back else None

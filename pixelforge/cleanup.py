@@ -75,6 +75,32 @@ def defringe(alpha: np.ndarray, lab: np.ndarray, background: np.ndarray, toleran
     return out
 
 
+def bleed_edges(rgba: np.ndarray, passes: int = 16) -> np.ndarray:
+    """Spread opaque colors outward into transparent pixels (texture padding).
+
+    When a cutout is used as a 3D texture, any surface that samples just
+    outside the silhouette would otherwise pick up the transparent pixels'
+    (black) color.  Alpha is left untouched.
+    """
+    out = rgba.copy()
+    rgb = out[..., :3].astype(np.float64)
+    filled = out[..., 3] > 0
+    for _ in range(passes):
+        if filled.all():
+            break
+        acc = np.zeros_like(rgb)
+        cnt = np.zeros(filled.shape, dtype=np.float64)
+        for dy, dx in _N8:
+            nf = _shift(filled, dy, dx, False)
+            acc += _shift(rgb, dy, dx, 0.0) * nf[..., None]
+            cnt += nf
+        grow = ~filled & (cnt > 0)
+        rgb[grow] = acc[grow] / cnt[grow][:, None]
+        filled |= grow
+    out[..., :3] = np.clip(np.rint(rgb), 0, 255).astype(np.uint8)
+    return out
+
+
 def remove_islands(alpha: np.ndarray, min_fraction: float = 0.02) -> np.ndarray:
     """Drop opaque blobs smaller than ``min_fraction`` of the largest blob.
 
