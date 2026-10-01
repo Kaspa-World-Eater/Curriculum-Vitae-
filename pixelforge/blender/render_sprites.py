@@ -133,6 +133,13 @@ def main() -> None:
     ppu = a.size / ortho
 
     # ------------------------------------------------------------- render setup
+    # Subdivision on an already-dense mesh multiplies render time 5-7x for no
+    # visible gain at sprite size: drop it for meshes that are dense already.
+    for m in meshes:
+        for mod in m.modifiers:
+            if mod.type == "SUBSURF" and len(m.data.polygons) > 8000:
+                mod.render_levels = 0
+                mod.levels = 0
     scene.render.engine = eevee_engine_id()
     try:
         scene.eevee.taa_render_samples = a.samples

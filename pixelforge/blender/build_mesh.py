@@ -191,7 +191,7 @@ def main() -> None:
     mat = build_projection_material(f"{a.name}_paint", front, back, side)
     assign_material(obj, mat)
 
-    if a.smooth > 0:
+    if a.smooth > 0 and spec.get("mode") != "hull":  # the hull is smoothed already
         sub = obj.modifiers.new("pf_smooth", "SUBSURF")
         sub.levels = sub.render_levels = a.smooth
 
