@@ -143,7 +143,7 @@ def test_prompts_use_description_everywhere():
     for k, text in build_all(d, "http://x/sheet.png").items():
         assert d in text
     assert "--cref http://x/sheet.png" in build_prompt("front", d, "http://x/sheet.png")
-    assert {k.key for k in PROMPT_KINDS} == {"sheet", "front", "back", "sprite", "item"}
+    assert {k.key for k in PROMPT_KINDS} == {"sheet", "sheet4", "front", "back", "sprite", "item"}
 
 
 def test_split_sheet_finds_three_views():

@@ -396,7 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
     x = ps.add_parser("add", help="add a character"); x.add_argument("character"); x.add_argument("--describe")
     x = ps.add_parser("describe", help="set the description"); x.add_argument("character"); x.add_argument("describe")
     x = ps.add_parser("prompts", help="Midjourney prompts for the character"); x.add_argument("character"); x.add_argument("--reference", default="[SHEET IMAGE URL]")
-    x = ps.add_parser("import", help="import an image"); x.add_argument("character"); x.add_argument("kind", choices=["sheet", "front", "back", "side", "style"]); x.add_argument("file")
+    x = ps.add_parser("import", help="import an image"); x.add_argument("character"); x.add_argument("kind", choices=["sheet", "front", "back", "side", "quarter", "style"]); x.add_argument("file")
     x = ps.add_parser("run", help="run one step"); x.add_argument("character"); x.add_argument("step", choices=["split", "palette", "model", "rig", "render", "pixelate", "export"])
     x.add_argument("--frame-step", type=int, default=2); x.add_argument("--elevation", type=float, default=30.0)
     x = ps.add_parser("run-all", help="run every remaining automatic step"); x.add_argument("character")

@@ -16,7 +16,7 @@ from PIL import Image
 from .cleanup import background_mask, border_color, defringe
 from .color import rgb_to_oklab
 
-DEFAULT_NAMES = {1: ["front"], 2: ["front", "back"], 3: ["front", "side", "back"], 4: ["front", "side", "back", "side_b"]}
+DEFAULT_NAMES = {1: ["front"], 2: ["front", "back"], 3: ["front", "side", "back"], 4: ["front", "quarter", "side", "back"]}
 
 
 @dataclass

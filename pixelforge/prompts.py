@@ -45,6 +45,19 @@ PROMPT_KINDS: list[PromptKind] = [
         "scenery, extra characters, cropping",
     ),
     PromptKind(
+        "sheet4",
+        "A2. Four-view sheet (best 3D model: adds the three-quarter view)",
+        "Like A, plus a three-quarter view. The extra outline makes the diagonal "
+        "directions (the ones Diablo uses most) carve and paint correctly.",
+        "character turnaround reference sheet of {description}, four views side by side: "
+        "front view, three-quarter view, side view, back view, standing in A-pose with arms "
+        "slightly away from the body, feet shoulder-width apart, full body head to toe, same "
+        "character in every view, orthographic, flat even lighting, no cast shadows, plain "
+        "solid white background, detailed dark fantasy digital painting, muted desaturated "
+        "colors, gritty painterly texture --ar 2:1 --style raw --no text, labels, perspective, "
+        "scenery, extra characters, cropping",
+    ),
+    PromptKind(
         "front",
         "B1. Front view, high-res (optional, nicer texture)",
         "Uses the sheet as a character reference. On Midjourney V7 replace --cref/--cw "

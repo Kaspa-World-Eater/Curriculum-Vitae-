@@ -117,20 +117,31 @@ def import_source(project: Project, name: str, kind: str, path: str | Path) -> d
     return {"ok": True, "character": c.name, "kind": kind, "saved": str(dest), "sources": c.sources, "next": "split"}
 
 
+def _count_figures(project: Project, c: Character, tolerance: float) -> int:
+    """3 or 4 figures on the sheet? Count the separate blobs, capped to 4."""
+    sheet = _source(project, c, "sheet")
+    if sheet is None:
+        return 3
+    views = split_sheet(Image.open(sheet), tolerance=tolerance)
+    return 4 if len(views) >= 4 else 3
+
+
 def _source(project: Project, c: Character, kind: str) -> Path | None:
     rel = c.sources.get(kind)
     return project.root / rel if rel else None
 
 
 # --------------------------------------------------------------------- split
-def split(project: Project, name: str, tolerance: float = 0.08) -> dict:
+def split(project: Project, name: str, tolerance: float = 0.08, expected_views: int | None = None) -> dict:
     """Cut the sheet (or the single front/back/side images) into view cutouts."""
     c = project.character(name)
+    if expected_views is None:
+        expected_views = int(c.settings.get("sheet_views", 0)) or _count_figures(project, c, tolerance)
     views_dir = project.sub(c.name, "views")
     made: dict[str, str] = {}
     sheet = _source(project, c, "sheet")
     if sheet is not None:
-        views = normalize_heights(split_sheet(Image.open(sheet), tolerance=tolerance, expected=3))
+        views = normalize_heights(split_sheet(Image.open(sheet), tolerance=tolerance, expected=4 if expected_views == 4 else 3))
         if not views:
             raise StepError("no figures found on the sheet; is the background plain?")
         for v in views:
@@ -138,7 +149,7 @@ def split(project: Project, name: str, tolerance: float = 0.08) -> dict:
             v.image.save(out)
             made[v.name] = str(out)
     # single views override the sheet's crops when supplied (they are higher-res)
-    for kind in ("front", "back", "side"):
+    for kind in ("front", "back", "side", "quarter"):
         single = _source(project, c, kind)
         if single is not None:
             rgba = cutout(Image.open(single), tolerance)
@@ -295,12 +306,14 @@ def build_model(project: Project, name: str, height: float = 1.8, columns: int =
     }
 
 
-DEFAULT_CLIPS = "idle,walk,run,attack,hit,death"
+DEFAULT_CLIPS = "idle,walk,run,attack,hit,death,cast"
+ANIMATION_LIBRARY = Path(__file__).resolve().parent.parent / "assets" / "animations" / "quaternius_ual_standard.glb"
 
 
-def rig(project: Project, name: str, clips: str = DEFAULT_CLIPS, log=None) -> dict:
+def rig(project: Project, name: str, clips: str = DEFAULT_CLIPS, library: str | Path | None = None, log=None) -> dict:
     """Rig + animate. Uses Mixamo FBX files if the person dropped any in
-    ``mixamo/``; otherwise the built-in auto-rig and animation library."""
+    ``mixamo/``; otherwise the built-in auto-rig with the bundled CC0 motion
+    library (procedural clips as fallback for anything the library lacks)."""
     c = project.character(name)
     mix = project.char_dir(c.name) / "mixamo"
     if mix.exists() and (list(mix.glob("*.fbx")) or list(mix.glob("*.FBX"))):
@@ -312,12 +325,20 @@ def rig(project: Project, name: str, clips: str = DEFAULT_CLIPS, log=None) -> di
     front = project.sub(c.name, "views") / "front.png"
     skel = write_skeleton(estimate_skeleton(Image.open(front)), model / f"{c.name}_skeleton.json")
     out = model / f"{c.name}_rigged.blend"
-    result = run_blender(project, "rig_character.py", ["--skeleton", skel, "--out", out, "--clips", clips], blend=blend, log=log)
+    lib = Path(library) if library else (ANIMATION_LIBRARY if ANIMATION_LIBRARY.exists() else None)
+    args = ["--skeleton", skel, "--out", out, "--clips", clips]
+    if lib is not None:
+        args += ["--library", lib]
+    for spec in c.settings.get("clip_overrides", []):  # e.g. "walk=Walk_Formal_Loop:loop"
+        args += ["--clip", spec]
+    result = run_blender(project, "rig_character.py", args, blend=blend, log=log)
     actions = result.split("actions=")[-1].split(" ")[0].split(",") if "actions=" in result else []
+    actions = [a for a in actions if a]
+    source = "motion library" if lib is not None else "procedural"
     c.done["rig"] = True
-    c.notes["rig"] = f"built-in rig, {len(actions)} animations: {', '.join(actions)}"
+    c.notes["rig"] = f"built-in rig ({source}), {len(actions)} animations: {', '.join(actions)}"
     project.save()
-    return {"ok": True, "character": c.name, "blend": str(out), "animations": actions, "source": "built-in", "next": "render"}
+    return {"ok": True, "character": c.name, "blend": str(out), "animations": actions, "source": source, "next": "render"}
 
 
 def import_mixamo(project: Project, name: str, depth_scale: float | None = None, log=None) -> dict:

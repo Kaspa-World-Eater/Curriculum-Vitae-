@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # type: ignore
-from mathutils import Vector  # type: ignore
+from mathutils import Matrix, Vector  # type: ignore
 
 from pf_common import mesh_objects, script_args  # noqa: E402
 
@@ -289,6 +289,7 @@ LIBRARY_MAP = {
     "RightLeg": "DEF-shin.R",
     "RightFoot": "DEF-foot.R",
 }
+ARM_CHAIN = {"LeftArm", "LeftForeArm", "LeftHand", "RightArm", "RightForeArm", "RightHand"}
 LIBRARY_CLIPS = {  # our clip -> (library action, loop)
     "idle": ("Idle_Loop", True),
     "walk": ("Walk_Loop", True),
@@ -365,7 +366,14 @@ def retarget_clip(src, dst, src_action, name: str, loop: bool, fps: int, src_fps
         rw, rd = _rest_world(dst, R + ours)
         sw, sd = _rest_world(src, theirs)
         rest[ours], srest[ours] = rw, sw
-        offs[ours] = rd.rotation_difference(sd).to_matrix()  # our dir -> their dir
+        # Only the arm chain differs in *pose* between the rigs (library is
+        # T-posed, ours hangs down); every other bone just takes the world
+        # rotation delta.  Aligning bone directions elsewhere would bake the
+        # library's zig-zag spine conventions into our body as a lean.
+        if ours in ARM_CHAIN:
+            offs[ours] = rd.rotation_difference(sd).to_matrix()  # our dir -> their dir
+        else:
+            offs[ours] = Matrix.Identity(3)
         pairs.append((ours, theirs))
     order = [b for b, _, _, _ in BONES if b in dict(pairs)]  # parents first
     their = dict(pairs)
