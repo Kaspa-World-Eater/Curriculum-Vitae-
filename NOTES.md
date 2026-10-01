@@ -45,6 +45,8 @@ server. Full operating manual for an AI: `docs/GUIDE_AI.md`. Human guide:
   of this art collapse in RGB distance; OKLab keeps them apart.
 - **One pixels-per-unit scale per project** (`settings.ppu` on characters) so
   every character is the right size relative to the others in the game.
+- **Free AI image-to-3D is worse than carving** (TripoSR, CPU, 2026-10-01:
+  washed-out blob). Don't re-test without a materially better free model.
 - **No local AI training / no local image generation.** Laptop can't; the
   look comes from Midjourney + the converter. Prompts are built into the app
   (`pixelforge/prompts.py`).
@@ -57,17 +59,23 @@ server. Full operating manual for an AI: `docs/GUIDE_AI.md`. Human guide:
 | procedural still animation (sway/flicker/bob/breathe), RotSprite rotate/spin | solid, tested | tests/test_core.py |
 | sheet split (front/side/back) | works on Derek's real sheet | `examples/output/sheet_wraith/` |
 | hull model + 3-view paint | works; 8-direction stills look right | `examples/output/sheet_wraith/model_8_directions.png` |
-| built-in rig + clips (idle/walk/run/attack/hit/death) | **new, first full run in progress** | see git log |
-| Mixamo path (import FBX, smooth weights) | works (tested with Derek's Walking.fbx) | — |
+| built-in rig + procedural clips (idle/walk/run/attack/hit/death) | works end to end; 48 clips rendered + exported unattended (2026-10-01) | scratch GIFs sent to Derek |
+| **motion library** (`assets/animations/`, CC0 Quaternius UAL, 46 clips) retargeted onto the rig | works; verified numerically (bones within 1-2 deg) and visually; now the default `rig` source | `docs/research/animation_sources.md` |
+| Mixamo path (import FBX, smooth weights) | works (tested with Derek's Walking.fbx); optional upgrade only | — |
 | render (Eevee, Xvfb in cloud) | works; ~1 s/frame CPU | — |
 | pixelate renders + export Godot | works | tests/test_project.py |
 | desktop app (Tkinter) | written, **never launched** (no display in cloud) | needs a Windows smoke test |
 | Godot demo project | **not built yet** | — |
 
 Known rough edges / next work, in priority order:
-1. Judge the first fully automatic walk/attack/death renders; tune clip
-   amplitudes and weight smoothing (robe folding into legs was the first
-   failure mode).
+1. Carving v3: four-view sheet (prompt A2 adds a three-quarter view) ->
+   carve the diagonal, paint diagonal faces with the quarter image, add
+   depth shading. Plumbing (prompt, split names, import kind "quarter") is
+   in; `build_hull_spec` and `build_mesh.py` still need the quarter carve +
+   UV_QUARTER projection + 5-way material blend. Waiting on Derek's sheet.
+1b. Retarget caveats: library walks lean forward (Walk_Loop ~20 deg); default
+   is Walk_Formal_Loop (upright). Per-character overrides live in
+   `character.settings["clip_overrides"]` (e.g. "walk=Walk_Loop:loop").
 2. Side texture blend (`pf_common.build_projection_material`): seams where
    side art meets front/back; consider feathering by |normal.x| more softly.
 3. Windows smoke test of `install.bat`, `PixelForge Studio.bat`, GUI.

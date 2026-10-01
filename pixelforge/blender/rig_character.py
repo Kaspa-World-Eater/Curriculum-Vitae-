@@ -292,7 +292,8 @@ LIBRARY_MAP = {
 ARM_CHAIN = {"LeftArm", "LeftForeArm", "LeftHand", "RightArm", "RightForeArm", "RightHand"}
 LIBRARY_CLIPS = {  # our clip -> (library action, loop)
     "idle": ("Idle_Loop", True),
-    "walk": ("Walk_Loop", True),
+    "walk": ("Walk_Formal_Loop", True),  # upright; Walk_Loop is a determined, hunched stride
+    "walk_hunched": ("Walk_Loop", True),
     "run": ("Jog_Fwd_Loop", True),
     "sprint": ("Sprint_Loop", True),
     "attack": ("Sword_Attack", False),
